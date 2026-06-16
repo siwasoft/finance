@@ -46,11 +46,21 @@ def get_or_create_worksheet(spreadsheet: gspread.Spreadsheet, title: str, header
     return ws
 
 
+def normalize_ticker(ticker: str) -> str:
+    # 구글 시트가 005930 → 5930 으로 앞자리 0을 제거하므로 복원
+    if ticker.isdigit() and len(ticker) <= 6:
+        return ticker.zfill(6)
+    return ticker
+
+
 def load_tickers(spreadsheet: gspread.Spreadsheet) -> list[dict]:
     ws = get_or_create_worksheet(spreadsheet, SETUP_TAB, SETUP_HEADERS)
     rows = ws.get_all_records()
     tickers = [
-        {"ticker": str(r["ticker"]).strip(), "종목명": str(r["종목명"]).strip()}
+        {
+            "ticker": normalize_ticker(str(r["ticker"]).strip()),
+            "종목명": str(r["종목명"]).strip(),
+        }
         for r in rows
         if str(r.get("수집여부(Y/N)", "")).strip().upper() == "Y"
     ]
@@ -81,9 +91,10 @@ def fetch_kr_stock(ticker: str) -> dict:
 
 def fetch_foreign_stock(ticker: str) -> dict:
     info = yf.Ticker(ticker)
-    hist = info.history(period="2d")
-    if hist.empty or len(hist) < 1:
-        raise ValueError(f"yfinance: {ticker} 데이터 없음")
+    hist = info.history(period="5d")  # 주말·공휴일을 고려해 5거래일치 요청
+    hist = hist.dropna(subset=["Close"])
+    if hist.empty:
+        raise ValueError(f"yfinance: {ticker} 데이터 없음 (5거래일 내 종가 없음)")
     close = float(hist["Close"].iloc[-1])
     volume = int(hist["Volume"].iloc[-1])
     if len(hist) >= 2:
