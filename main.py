@@ -14,9 +14,13 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-SETUP_TAB = "설정(Setup)"
-DATA_LOG_TAB = "데이터로그(Data_Log)"
-ERROR_LOG_TAB = "에러로그(Error_Log)"
+SETUP_TAB = "Setup"
+DATA_LOG_TAB = "Data_Log"
+ERROR_LOG_TAB = "Error_Log"
+
+SETUP_HEADERS = ["ticker", "종목명", "수집여부(Y/N)", "비고"]
+DATA_LOG_HEADERS = ["수집일자", "수집시간", "ticker", "종목명", "현재가", "등락률", "거래량", "상태"]
+ERROR_LOG_HEADERS = ["발생일시", "ticker", "에러내용"]
 
 
 def get_gspread_client() -> gspread.Client:
@@ -31,14 +35,28 @@ def open_spreadsheet(client: gspread.Client) -> gspread.Spreadsheet:
     return client.open_by_url(url)
 
 
+def get_or_create_worksheet(spreadsheet: gspread.Spreadsheet, title: str, headers: list) -> gspread.Worksheet:
+    try:
+        ws = spreadsheet.worksheet(title)
+        print(f"  탭 확인: '{title}' 존재")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=title, rows=1000, cols=len(headers))
+        ws.append_row(headers, value_input_option="USER_ENTERED")
+        print(f"  탭 생성: '{title}' (헤더 자동 추가)")
+    return ws
+
+
 def load_tickers(spreadsheet: gspread.Spreadsheet) -> list[dict]:
-    ws = spreadsheet.worksheet(SETUP_TAB)
-    rows = ws.get_all_records()  # 헤더 행을 키로 자동 파싱
-    return [
+    ws = get_or_create_worksheet(spreadsheet, SETUP_TAB, SETUP_HEADERS)
+    rows = ws.get_all_records()
+    tickers = [
         {"ticker": str(r["ticker"]).strip(), "종목명": str(r["종목명"]).strip()}
         for r in rows
         if str(r.get("수집여부(Y/N)", "")).strip().upper() == "Y"
     ]
+    if not tickers:
+        print(f"  [안내] '{SETUP_TAB}' 탭에 수집여부(Y/N)=Y 인 종목이 없습니다. 종목을 등록해 주세요.")
+    return tickers
 
 
 def is_korean_stock(ticker: str) -> bool:
@@ -53,14 +71,11 @@ def fetch_kr_stock(ticker: str) -> dict:
     row = df.iloc[-1]
     close = float(row["종가"])
     volume = int(row["거래량"])
-
-    # 등락률: pykrx 컬럼명 '등락률' 또는 직접 계산
     if "등락률" in df.columns:
         change_rate = float(row["등락률"])
     else:
-        prev_close = float(row["시가"])  # 근사값 fallback
+        prev_close = float(row["시가"])
         change_rate = round((close - prev_close) / prev_close * 100, 2) if prev_close else 0.0
-
     return {"현재가": close, "등락률": change_rate, "거래량": volume}
 
 
@@ -119,10 +134,10 @@ def main() -> None:
     spreadsheet = open_spreadsheet(client)
 
     tickers = load_tickers(spreadsheet)
-    print(f"수집 대상 종목 수: {len(tickers)}")
+    data_ws = get_or_create_worksheet(spreadsheet, DATA_LOG_TAB, DATA_LOG_HEADERS)
+    error_ws = get_or_create_worksheet(spreadsheet, ERROR_LOG_TAB, ERROR_LOG_HEADERS)
 
-    data_ws = spreadsheet.worksheet(DATA_LOG_TAB)
-    error_ws = spreadsheet.worksheet(ERROR_LOG_TAB)
+    print(f"수집 대상 종목 수: {len(tickers)}")
 
     for item in tickers:
         ticker = item["ticker"]
