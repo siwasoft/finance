@@ -82,7 +82,7 @@ def fetch_kr_stock(ticker: str) -> dict:
     close = float(row["종가"])
     volume = int(row["거래량"])
     if "등락률" in df.columns:
-        change_rate = float(row["등락률"])
+        change_rate = round(float(row["등락률"]), 2)
     else:
         prev_close = float(row["시가"])
         change_rate = round((close - prev_close) / prev_close * 100, 2) if prev_close else 0.0
