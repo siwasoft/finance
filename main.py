@@ -74,10 +74,12 @@ def is_korean_stock(ticker: str) -> bool:
 
 
 def fetch_kr_stock(ticker: str) -> dict:
-    today = datetime.now(KST).strftime("%Y%m%d")
-    df = krx.get_market_ohlcv_by_date(today, today, ticker)
+    today = datetime.now(KST)
+    start = (today - timedelta(days=7)).strftime("%Y%m%d")
+    end = today.strftime("%Y%m%d")
+    df = krx.get_market_ohlcv_by_date(start, end, ticker)
     if df.empty:
-        raise ValueError(f"pykrx: {ticker} 데이터 없음 (장 미개장 또는 상장폐지)")
+        raise ValueError(f"pykrx: {ticker} 데이터 없음 (상장폐지 또는 조회 실패)")
     row = df.iloc[-1]
     close = float(row["종가"])
     volume = int(row["거래량"])
