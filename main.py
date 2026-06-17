@@ -14,7 +14,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-SETUP_TAB = "Setup"
+SETUP_TAB = "setting"
 DATA_LOG_TAB = "Data_Log"
 ERROR_LOG_TAB = "Error_Log"
 
