@@ -218,19 +218,32 @@ def fetch_kr_stock(ticker: str) -> dict:
     }
 
 
-def fetch_foreign_stock(ticker: str) -> dict:
+def get_usd_krw_rate() -> float:
+    hist = yf.Ticker("KRW=X").history(period="5d").dropna(subset=["Close"])
+    if hist.empty:
+        raise ValueError("USD/KRW 환율 데이터를 가져올 수 없습니다.")
+    return float(hist["Close"].iloc[-1])
+
+
+def usd_to_krw(val, rate: float):
+    if val == "" or val is None:
+        return ""
+    return round(float(val) * rate)
+
+
+def fetch_foreign_stock(ticker: str, usd_krw: float) -> dict:
     info_ticker = yf.Ticker(ticker)
     hist = info_ticker.history(period="5d")
     hist = hist.dropna(subset=["Close"])
     if hist.empty:
         raise ValueError(f"yfinance: {ticker} 데이터 없음 (5거래일 내 종가 없음)")
-        
+
     row = hist.iloc[-1]
     close = float(row["Close"])
     high = float(row["High"])
     low = float(row["Low"])
     volume = int(row["Volume"])
-    
+
     # 등락금액, 등락률, 전일종가
     if len(hist) >= 2:
         prev_close = float(hist["Close"].iloc[-2])
@@ -255,7 +268,7 @@ def fetch_foreign_stock(ticker: str) -> dict:
         per_val = info.get("forwardPE")
     if per_val is not None and per_val != "":
         per = round(float(per_val), 2)
-        
+
     # 시가총액
     market_cap = ""
     mc_val = info.get("marketCap")
@@ -265,8 +278,8 @@ def fetch_foreign_stock(ticker: str) -> dict:
         except Exception:
             pass
     if mc_val is not None and mc_val != "":
-        market_cap = int(mc_val)
-    
+        market_cap = mc_val
+
     high_52w, low_52w = get_52w_high_low(info_ticker, info)
 
     # 재무 데이터
@@ -279,27 +292,28 @@ def fetch_foreign_stock(ticker: str) -> dict:
     except Exception:
         pass
 
+    r = usd_krw
     return {
-        "현재가": close,
-        "등락(금액)": change_val,
+        "현재가": usd_to_krw(close, r),
+        "등락(금액)": usd_to_krw(change_val, r),
         "등락률": change_rate,
         "거래량": volume,
-        "고가": high,
-        "저가": low,
-        "전일 종가": prev_close,
+        "고가": usd_to_krw(high, r),
+        "저가": usd_to_krw(low, r),
+        "전일 종가": usd_to_krw(prev_close, r),
         "per": per,
-        "시가총액": market_cap,
-        "52주 신고가": high_52w,
-        "52주 신저가": low_52w,
-        "매출액": rev,
-        "손이익": net_inc,
-        "부채총계": liab,
-        "영업현금흐름": ocf,
+        "시가총액": usd_to_krw(market_cap, r),
+        "52주 신고가": usd_to_krw(high_52w, r),
+        "52주 신저가": usd_to_krw(low_52w, r),
+        "매출액": usd_to_krw(rev, r),
+        "손이익": usd_to_krw(net_inc, r),
+        "부채총계": usd_to_krw(liab, r),
+        "영업현금흐름": usd_to_krw(ocf, r),
         "기준일자": datetime.now(KST).strftime("%Y-%m-%d")
     }
 
 
-def collect(ticker: str, name: str) -> dict:
+def collect(ticker: str, name: str, usd_krw: float) -> dict:
     now = datetime.now(KST)
     base = {
         "종목코드": ticker,
@@ -309,7 +323,7 @@ def collect(ticker: str, name: str) -> dict:
     if is_korean_stock(ticker):
         data = fetch_kr_stock(ticker)
     else:
-        data = fetch_foreign_stock(ticker)
+        data = fetch_foreign_stock(ticker, usd_krw)
     return {**base, **data, "상태": "정상"}
 
 
@@ -356,6 +370,8 @@ def main() -> None:
     data_ws.append_row(DATA_LOG_HEADERS, value_input_option="USER_ENTERED")
     error_ws = get_or_create_worksheet(spreadsheet, ERROR_LOG_TAB, ERROR_LOG_HEADERS)
 
+    usd_krw = get_usd_krw_rate()
+    print(f"  USD/KRW 환율: {usd_krw:,.0f}원")
     print(f"수집 대상 종목 수: {len(tickers)}")
 
     for item in tickers:
@@ -363,7 +379,7 @@ def main() -> None:
         name = item["종목명"]
         print(f"  수집 중: {ticker} ({name})", end=" ")
         try:
-            row = collect(ticker, name)
+            row = collect(ticker, name, usd_krw)
             append_data_log(data_ws, row)
             print(f"-> 정상 (현재가: {row['현재가']}, 등락(금액): {row['등락(금액)']}, 거래량: {row['거래량']})")
         except Exception as e:
@@ -395,6 +411,7 @@ def main() -> None:
             append_data_log(data_ws, error_row)
             append_error_log(error_ws, ticker, error_msg)
         time.sleep(1.5)
+
 
     print("=== Stock Log 완료 ===")
 
