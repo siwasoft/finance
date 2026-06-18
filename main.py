@@ -214,7 +214,7 @@ def fetch_kr_stock(ticker: str) -> dict:
         "손이익": net_inc,
         "부채총계": liab,
         "영업현금흐름": ocf,
-        "기준일자": df.index[-1].strftime("%Y-%m-%d")
+        "기준일자": datetime.now(KST).strftime("%Y-%m-%d")
     }
 
 
@@ -295,7 +295,7 @@ def fetch_foreign_stock(ticker: str) -> dict:
         "손이익": net_inc,
         "부채총계": liab,
         "영업현금흐름": ocf,
-        "기준일자": hist.index[-1].strftime("%Y-%m-%d")
+        "기준일자": datetime.now(KST).strftime("%Y-%m-%d")
     }
 
 
@@ -351,6 +351,9 @@ def main() -> None:
 
     tickers = load_tickers(spreadsheet)
     data_ws = get_or_create_worksheet(spreadsheet, DATA_LOG_TAB, DATA_LOG_HEADERS)
+    print("  이전 데이터 로그 삭제 중 (Data_Log 초기화)...")
+    data_ws.clear()
+    data_ws.append_row(DATA_LOG_HEADERS, value_input_option="USER_ENTERED")
     error_ws = get_or_create_worksheet(spreadsheet, ERROR_LOG_TAB, ERROR_LOG_HEADERS)
 
     print(f"수집 대상 종목 수: {len(tickers)}")
