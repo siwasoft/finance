@@ -1,0 +1,35 @@
+name: Diagnose Spreadsheet (진단용)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth
+      - run: |
+          python - <<'EOF'
+          import json, os
+          import gspread
+          from google.oauth2.service_account import Credentials
+
+          SCOPES = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
+          creds = Credentials.from_service_account_info(json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"]), scopes=SCOPES)
+          client = gspread.authorize(creds)
+          url = os.environ["SPREADSHEET_URL"]
+          print(f"접속 URL: {url}")
+          ss = client.open_by_url(url)
+          print(f"스프레드시트 제목: {ss.title}")
+          print(f"탭 목록:")
+          for ws in ss.worksheets():
+              rows = ws.row_count
+              print(f"  - '{ws.title}' (행 수: {rows})")
+          EOF
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
