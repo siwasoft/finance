@@ -156,13 +156,13 @@ def fetch_kr_stock(ticker: str) -> dict:
     if len(df) >= 2:
         prev_close = float(df.iloc[-2]["종가"])
         change_val = close - prev_close
-        change_rate = round((change_val / prev_close) * 100, 2)
+        change_rate = change_val / prev_close
     else:
         prev_close = ""
         change_val = ""
         change_rate = ""
         if "등락률" in df.columns:
-            change_rate = round(float(row["등락률"]), 2)
+            change_rate = float(row["등락률"]) / 100.0
 
     # 2. yfinance 연동을 통해 PER, 시가총액, 52주 고가/저가, 재무제표 데이터 수집
     per, market_cap = "", ""
@@ -247,8 +247,8 @@ def fetch_foreign_stock(ticker: str, usd_krw: float) -> dict:
     # 등락금액, 등락률, 전일종가
     if len(hist) >= 2:
         prev_close = float(hist["Close"].iloc[-2])
-        change_val = round(close - prev_close, 4)
-        change_rate = round((change_val / prev_close) * 100, 2)
+        change_val = close - prev_close
+        change_rate = change_val / prev_close
     else:
         prev_close = ""
         change_val = ""
@@ -358,36 +358,49 @@ def append_error_log(ws: gspread.Worksheet, ticker: str, error_msg: str) -> None
     ws.append_row([now, ticker, error_msg], value_input_option="USER_ENTERED")
 
 
-def reset_data_worksheet(spreadsheet: gspread.Spreadsheet, ws: gspread.Worksheet) -> None:
-    """행 자체를 삭제해서 완전히 초기화한 뒤 헤더 1행만 남긴다."""
-    sheet_id = ws.id
-    total_rows = ws.row_count  # 그리드 전체 행 수
+def row_to_list(row: dict) -> list:
+    return [
+        row.get("기준일자", ""),
+        row.get("종목코드", ""),
+        row.get("종목명", ""),
+        row.get("현재가", ""),
+        row.get("등락(금액)", ""),
+        row.get("등락률", ""),
+        row.get("거래량", ""),
+        row.get("고가", ""),
+        row.get("저가", ""),
+        row.get("전일 종가", ""),
+        row.get("per", ""),
+        row.get("시가총액", ""),
+        row.get("52주 신고가", ""),
+        row.get("52주 신저가", ""),
+        row.get("매출액", ""),
+        row.get("손이익", ""),
+        row.get("부채총계", ""),
+        row.get("영업현금흐름", ""),
+        row.get("수집일시", ""),
+        row.get("상태", "")
+    ]
 
-    if total_rows > 1:
-        spreadsheet.batch_update({"requests": [{
-            "deleteDimension": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "dimension": "ROWS",
-                    "startIndex": 1,        # 0-based → 2행부터
-                    "endIndex": total_rows,  # exclusive
-                }
-            }
-        }]})
 
-    ws.update([DATA_LOG_HEADERS], "A1", value_input_option="USER_ENTERED")
-    print(f"  Data_Log 초기화 완료 (기존 {total_rows - 1}개 행 삭제, 헤더 재설정)")
+def reset_data_worksheet_and_update(ws: gspread.Worksheet, data_rows: list) -> None:
+    """기존 데이터를 모두 지우고(clear), 새 데이터를 A1부터 덮어쓴다. 빈 행 문제 해결."""
+    ws.clear()
+    all_values = [DATA_LOG_HEADERS] + data_rows
+    ws.update(range_name="A1", values=all_values, value_input_option="USER_ENTERED")
+    print(f"  Data_Log 갱신 완료 (총 {len(data_rows)}개 종목 기록)")
 
 
 def apply_sheet_formatting(spreadsheet: gspread.Spreadsheet, ws: gspread.Worksheet) -> None:
     sheet_id = ws.id
 
-    # ── 1. 원화(₩) 숫자 서식: 금액 컬럼 전체에 적용 ──────────────────────
+    # 1. 일반 원화(₩) 컬럼
     krw_cols = [
-        "현재가", "등락(금액)", "고가", "저가", "전일 종가", "시가총액",
-        "52주 신고가", "52주 신저가", "매출액", "손이익", "부채총계", "영업현금흐름",
+        "현재가", "고가", "저가", "전일 종가", "시가총액",
+        "52주 신고가", "52주 신저가", "매출액", "손이익", "부채총계", "영업현금흐름"
     ]
     fmt_reqs = []
+    
     for col_name in krw_cols:
         col_idx = DATA_LOG_HEADERS.index(col_name)
         fmt_reqs.append({
@@ -395,7 +408,6 @@ def apply_sheet_formatting(spreadsheet: gspread.Spreadsheet, ws: gspread.Workshe
                 "range": {
                     "sheetId": sheet_id,
                     "startRowIndex": 1,
-                    "endRowIndex": 10000,
                     "startColumnIndex": col_idx,
                     "endColumnIndex": col_idx + 1,
                 },
@@ -407,73 +419,50 @@ def apply_sheet_formatting(spreadsheet: gspread.Spreadsheet, ws: gspread.Workshe
                 "fields": "userEnteredFormat.numberFormat",
             }
         })
+
+    # 2. 등락(금액) 포맷 (양수 파랑, 음수 빨강)
+    change_val_idx = DATA_LOG_HEADERS.index("등락(금액)")
+    fmt_reqs.append({
+        "repeatCell": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,
+                "startColumnIndex": change_val_idx,
+                "endColumnIndex": change_val_idx + 1,
+            },
+            "cell": {
+                "userEnteredFormat": {
+                    "numberFormat": {"type": "NUMBER", "pattern": "[Blue]₩#,##0;[Red]-₩#,##0;₩0"}
+                }
+            },
+            "fields": "userEnteredFormat.numberFormat",
+        }
+    })
+
+    # 3. 등락률 포맷 (양수 파랑, 음수 빨강)
+    rate_idx = DATA_LOG_HEADERS.index("등락률")
+    fmt_reqs.append({
+        "repeatCell": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,
+                "startColumnIndex": rate_idx,
+                "endColumnIndex": rate_idx + 1,
+            },
+            "cell": {
+                "userEnteredFormat": {
+                    "numberFormat": {"type": "NUMBER", "pattern": "[Blue]0.00%;[Red]-0.00%;0.00%"}
+                }
+            },
+            "fields": "userEnteredFormat.numberFormat",
+        }
+    })
+
     try:
         spreadsheet.batch_update({"requests": fmt_reqs})
-        print("  원화(₩) 숫자 서식 적용 완료")
+        print("  숫자 및 색상 서식 적용 완료")
     except Exception as e:
-        print(f"  원화 서식 적용 실패: {e}")
-
-    # ── 2. 등락률 조건부 색상 서식 ─────────────────────────────────────────
-    rate_col = DATA_LOG_HEADERS.index("등락률")
-
-    # 기존 조건부 서식 규칙 개수 조회 (중복 누적 방지)
-    cf_count = 0
-    try:
-        resp = spreadsheet.client.request(
-            "GET",
-            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet.id}",
-            params={"fields": "sheets(properties/sheetId,conditionalFormats)"},
-        )
-        for s in resp.json().get("sheets", []):
-            if s.get("properties", {}).get("sheetId") == sheet_id:
-                cf_count = len(s.get("conditionalFormats", []))
-                break
-        if cf_count:
-            print(f"  기존 조건부 서식 {cf_count}개 삭제 후 재적용")
-    except Exception as e:
-        print(f"  기존 서식 조회 실패 (신규 추가만 진행): {e}")
-
-    col_range = {
-        "sheetId": sheet_id,
-        "startRowIndex": 1,
-        "startColumnIndex": rate_col,
-        "endColumnIndex": rate_col + 1,
-    }
-    cf_reqs = [
-        {"deleteConditionalFormatRule": {"sheetId": sheet_id, "index": i}}
-        for i in range(cf_count - 1, -1, -1)
-    ]
-    cf_reqs += [
-        {
-            "addConditionalFormatRule": {
-                "rule": {
-                    "ranges": [col_range],
-                    "booleanRule": {
-                        "condition": {"type": "NUMBER_GREATER", "values": [{"userEnteredValue": "0"}]},
-                        "format": {"textFormat": {"foregroundColorStyle": {"rgbColor": {"red": 0.13, "green": 0.47, "blue": 0.71}}}},
-                    },
-                },
-                "index": 0,
-            }
-        },
-        {
-            "addConditionalFormatRule": {
-                "rule": {
-                    "ranges": [col_range],
-                    "booleanRule": {
-                        "condition": {"type": "NUMBER_LESS", "values": [{"userEnteredValue": "0"}]},
-                        "format": {"textFormat": {"foregroundColorStyle": {"rgbColor": {"red": 0.84, "green": 0.19, "blue": 0.15}}}},
-                    },
-                },
-                "index": 1,
-            }
-        },
-    ]
-    try:
-        spreadsheet.batch_update({"requests": cf_reqs})
-        print("  등락률 색상 서식 적용 완료 (양수: 파랑, 음수: 빨강)")
-    except Exception as e:
-        print(f"  조건부 서식 적용 실패: {e}")
+        print(f"  서식 적용 실패: {e}")
 
 
 def main() -> None:
@@ -484,11 +473,12 @@ def main() -> None:
     tickers = load_tickers(spreadsheet)
     data_ws = get_or_create_worksheet(spreadsheet, DATA_LOG_TAB, DATA_LOG_HEADERS)
     error_ws = get_or_create_worksheet(spreadsheet, ERROR_LOG_TAB, ERROR_LOG_HEADERS)
-    reset_data_worksheet(spreadsheet, data_ws)
 
     usd_krw = get_usd_krw_rate()
     print(f"  USD/KRW 환율: {usd_krw:,.0f}원")
     print(f"수집 대상 종목 수: {len(tickers)}")
+
+    all_data_rows = []
 
     for item in tickers:
         ticker = item["ticker"]
@@ -496,7 +486,7 @@ def main() -> None:
         print(f"  수집 중: {ticker} ({name})", end=" ")
         try:
             row = collect(ticker, name, usd_krw)
-            append_data_log(data_ws, row)
+            all_data_rows.append(row_to_list(row))
             print(f"-> 정상 (현재가: {row['현재가']}, 등락(금액): {row['등락(금액)']}, 거래량: {row['거래량']})")
         except Exception as e:
             error_msg = str(e)
@@ -524,10 +514,14 @@ def main() -> None:
                 "수집일시": now.strftime("%Y-%m-%d %H:%M:%S"),
                 "상태": "오류",
             }
-            append_data_log(data_ws, error_row)
+            all_data_rows.append(row_to_list(error_row))
             append_error_log(error_ws, ticker, error_msg)
         time.sleep(1.5)
 
+    # 모든 데이터 수집 후 시트에 한 번에 업데이트
+    reset_data_worksheet_and_update(data_ws, all_data_rows)
+
+    # 서식 적용
     apply_sheet_formatting(spreadsheet, data_ws)
     print("=== Stock Log 완료 ===")
 
