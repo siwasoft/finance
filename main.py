@@ -458,6 +458,26 @@ def apply_sheet_formatting(spreadsheet: gspread.Spreadsheet, ws: gspread.Workshe
         }
     })
 
+    # 4. 환율 셀(U1:V1) 강조 서식 (노란 배경 + 굵게)
+    fmt_reqs.append({
+        "repeatCell": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 0,
+                "endRowIndex": 1,
+                "startColumnIndex": 20,  # U열 (0-based)
+                "endColumnIndex": 22,    # V열까지 (exclusive)
+            },
+            "cell": {
+                "userEnteredFormat": {
+                    "backgroundColor": {"red": 1.0, "green": 0.95, "blue": 0.6},
+                    "textFormat": {"bold": True},
+                }
+            },
+            "fields": "userEnteredFormat(backgroundColor,textFormat.bold)",
+        }
+    })
+
     try:
         spreadsheet.batch_update({"requests": fmt_reqs})
         print("  숫자 및 색상 서식 적용 완료")
@@ -520,6 +540,13 @@ def main() -> None:
 
     # 모든 데이터 수집 후 시트에 한 번에 업데이트
     reset_data_worksheet_and_update(data_ws, all_data_rows)
+
+    # 환율 정보를 헤더 우측(U1:V1)에 표시
+    data_ws.update(
+        values=[["USD/KRW 환율", f"1달러 = {int(usd_krw):,}원"]],
+        range_name="U1",
+        value_input_option="USER_ENTERED",
+    )
 
     # 서식 적용
     apply_sheet_formatting(spreadsheet, data_ws)
