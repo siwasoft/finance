@@ -542,11 +542,22 @@ def main() -> None:
     reset_data_worksheet_and_update(data_ws, all_data_rows)
 
     # 환율 정보를 헤더 우측(U1:V1)에 표시
-    data_ws.update(
-        values=[["USD/KRW 환율", f"1달러 = {int(usd_krw):,}원"]],
-        range_name="U1",
-        value_input_option="USER_ENTERED",
-    )
+    try:
+        data_ws.update(
+            values=[["USD/KRW 환율", f"1달러 = {int(usd_krw):,}원"]],
+            range_name="U1",
+            value_input_option="USER_ENTERED",
+        )
+    except Exception as e:
+        if "exceeds grid limits" in str(e):
+            data_ws.add_cols(2)
+            data_ws.update(
+                values=[["USD/KRW 환율", f"1달러 = {int(usd_krw):,}원"]],
+                range_name="U1",
+                value_input_option="USER_ENTERED",
+            )
+        else:
+            raise
 
     # 서식 적용
     apply_sheet_formatting(spreadsheet, data_ws)
